@@ -1,0 +1,15 @@
+ckpt/
+
+data/
+
+logs/
+
+detr/
+
+预处理.ipynb
+
+wandb/
+
+.ipynb_checkpoints/
+
+*.pyc
