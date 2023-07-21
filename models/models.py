@@ -153,7 +153,7 @@ class RADFREModel(nn.Module):
         entity_joint_emb = self.fc_entity(entity_emb)#torch.Size(bzs, 2, 1024])
         entity_joint_emb = self.dropout_ent(entity_joint_emb)
         att, att_out = self.mha(entity_joint_emb, pairs_emb_lst[0], pairs_emb_lst[0])
-        # bsz = att_out.shape[0]
+        bsz = att_out.shape[0]
         logits = att_out.view(bsz,-1) 
         logits = torch.cat([logits, stc ],dim=-1)     
         logits = self.classifier(logits)
