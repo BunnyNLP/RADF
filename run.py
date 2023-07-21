@@ -213,9 +213,7 @@ def main():
         if not os.path.exists(args.save_path):
             os.makedirs(args.save_path, exist_ok=True)
 
-    args.lr = 0.001
-    args.batch_size = 32
-    args.num_epochs = 20
+
     print(args)
 
     logdir = "logs/" + args.dataset_name+ "_"+str(args.batch_size) + "_" + str(args.lr) + args.notes
