@@ -62,6 +62,26 @@ class ImageModel(nn.Module):
                 # img = F.normalize(img, p=2, dim=-1)
                 return img
 
+class PrefixEncoder(torch.nn.Module):
+    def __init__(self,seq_len,dim_ebd,num_layer):
+        '''
+        seq_len : The length of prompt
+        dim_ebd : the dimension of the bert model
+        num_layer : the number of hidden layer in BERT
+        '''
+        super().__init__()
+        # self.embedding = torch.nn.Embedding(seq_len, dim_ebd)
+        self.trans = torch.nn.Sequential(
+            torch.nn.Linear(dim_ebd, dim_ebd),
+            torch.nn.Tanh(),
+            torch.nn.Linear(dim_ebd, num_layer * 2 * dim_ebd)
+        ).cuda()
+    def forward(self, prefix):#bsz,80,1024
+        # prefix_tokens = self.embedding(prefix)
+        past_key_values = self.trans(prefix)
+        return past_key_values
+    
+
 
 class RADFREModel(nn.Module):
     def __init__(self, num_labels, tokenizer, args, num_layer_routing=3, num_cells=3, path_hid=128):
@@ -98,9 +118,27 @@ class RADFREModel(nn.Module):
         self.dropout_ent = nn.Dropout(p=0.5)
         self.mha = MultiHeadAttention(n_head=16, query_input_dim=1024, key_input_dim=1024 , value_input_dim=1024, query_hidden=1024, key_hidden=1024, value_hidden=1024, output_dim=1024)#n_head, query_input_dim, key_input_dim, value_input_dim, query_hidden, key_hidden, value_hidden, output_dim
 
-        self.classifier = nn.Linear(args.embed_size*3, num_labels)
+        self.fc_prompt = nn.Linear(80,10)
+        self.fc_prompt_ = nn.Linear(1024,768)
+        self.prompt_encoder = PrefixEncoder(10, self.bert.config.hidden_size ,self.bert.config.num_hidden_layers)
 
-        
+        self.classifier = nn.Linear(self.bert.config.hidden_size*2, num_labels)
+
+    def get_prompt(self, batch_size, x):
+        '''x : bsz, 10, 768'''
+        past_key_values = self.prompt_encoder(x)
+        bsz, seqlen, _ = past_key_values.shape
+        past_key_values = past_key_values.view(
+            bsz,
+            seqlen,
+            self.bert.config.num_hidden_layers * 2,
+            self.bert.config.num_attention_heads,
+            self.bert.config.hidden_size//self.bert.config.num_attention_heads
+                )
+        past_key_values = self.dropout(past_key_values)
+        past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(2)
+        return past_key_values, seqlen
+    
 
 
     def forward(
@@ -143,20 +181,59 @@ class RADFREModel(nn.Module):
         pairs_emb_lst, paths_l1 = self.dynamic_itr_l1(pairs_emb_lst, rgn, img, wrd, stc, stc_lens)
         pairs_emb_lst, paths_l2 = self.dynamic_itr_l2(pairs_emb_lst, rgn, img, wrd, stc, stc_lens)
 
-        # logits = self.classifier(pairs_emb_lst, rgn, img, wrd, stc, stc_lens)#相当于特定任务的分类头，要输出logits
-        # if init_states is None:
-        #     h0 = torch.randn(4, 3, 20).cuda()
-        #     c0 = torch.randn(4, 3, 20).cuda()
-        # else:
-            
+
+        #Prompt tuning
+        bsz = input_ids.size(0)
+        prompt_guids = pairs_emb_lst[0].permute(0,2,1)#bsz,1024,80
+        prompt_guids = self.fc_prompt(prompt_guids)#bsz,1024,10
+        prompt_guids = prompt_guids.permute(0,2,1)#bsz,10,1024
+        prompt_guids = self.fc_prompt_(prompt_guids)#bsz,10,768
+        prompt_guids, seq_len = self.get_prompt(bsz, prompt_guids)
+
+
+        # seq_len = prompt_guids.size(1)
+        prompt_guids_mask = torch.ones(bsz,seq_len).cuda()
+
+        if self.args.use_prompt:
+            prompt_guids = prompt_guids
+            prompt_guids_length = prompt_guids[0][0].shape[2]
+            prompt_guids_mask = torch.ones((bsz, prompt_guids_length)).cuda()
+            prompt_attention_mask = torch.cat((prompt_guids_mask, attention_mask), dim=1)
+        else:
+            prompt_guids = None
+            prompt_attention_mask = attention_mask
+
+        
+        output = self.bert(
+                    input_ids=input_ids,
+                    token_type_ids=token_type_ids,
+                    attention_mask=prompt_attention_mask,
+                    past_key_values=prompt_guids,
+                    output_attentions=True,
+                    return_dict=True
+        )
+        last_hidden_state, pooler_output = output.last_hidden_state, output.pooler_output
+        bsz, seq_len, hidden_size = last_hidden_state.shape
+        entity_hidden_state = torch.Tensor(bsz, 2*hidden_size) # batch, 2*hidden
+        for i in range(bsz):
+            head_idx = input_ids[i].eq(self.head_start).nonzero().item()
+            tail_idx = input_ids[i].eq(self.tail_start).nonzero().item()
+            head_hidden = last_hidden_state[i, head_idx, :].squeeze()
+            tail_hidden = last_hidden_state[i, tail_idx, :].squeeze()
+            entity_hidden_state[i] = torch.cat([head_hidden, tail_hidden], dim=-1)
+        entity_hidden_state = entity_hidden_state.to(self.args.device)
+        # import pdb;pdb.set_trace()
+        logits = self.classifier(entity_hidden_state)
+        
+        #普通分类头
         # lstm_output, (hn, cn) = self.lstm(pairs_emb_lst[0])#torch.Size([bsz, 80, 1024])
-        entity_joint_emb = self.fc_entity(entity_emb)#torch.Size(bzs, 2, 1024])
-        entity_joint_emb = self.dropout_ent(entity_joint_emb)
-        att, att_out = self.mha(entity_joint_emb, pairs_emb_lst[0], pairs_emb_lst[0])
-        bsz = att_out.shape[0]
-        logits = att_out.view(bsz,-1) 
-        logits = torch.cat([logits, stc ],dim=-1)     
-        logits = self.classifier(logits)
+        # entity_joint_emb = self.fc_entity(entity_emb)#torch.Size(bzs, 2, 1024])
+        # entity_joint_emb = self.dropout_ent(entity_joint_emb)
+        # att, att_out = self.mha(entity_joint_emb, pairs_emb_lst[0], pairs_emb_lst[0])
+        # bsz = att_out.shape[0]
+        # logits = att_out.view(bsz,-1) 
+        # logits = torch.cat([logits, stc ],dim=-1)     
+        # logits = self.classifier(logits)
         
 
         # n_img, n_stc = paths_l2.size()[:2]#torch.Size([16, 1, 3]) -> torch.Size([16, 1])
