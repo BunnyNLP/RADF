@@ -95,7 +95,7 @@ class RADFREModel(nn.Module):
         self.tail_start = tokenizer.convert_tokens_to_ids("<o>")
         self.tokenizer = tokenizer
 
-        freeze_layers(self.bert)#冻结参数
+        # freeze_layers(self.bert)#冻结参数
 
         self.image_model = ImageModel(args)
 

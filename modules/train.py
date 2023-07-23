@@ -222,11 +222,17 @@ class RETrainer(BaseTrainer):
         # for name, param in self.model.named_parameters():
         #     if 'image_model' in name:
         #         param.require_grad = False
-
+        # from torch.optim.lr_scheduler import MultiStepLR
         self.optimizer = optim.AdamW(self.model.parameters(), lr=self.args.lr)
         self.scheduler = get_linear_schedule_with_warmup(optimizer=self.optimizer, 
                                                             num_warmup_steps=self.args.warmup_ratio*self.train_num_steps, 
                                                                 num_training_steps=self.train_num_steps)
+        # self.scheduler = MultiStepLR(
+        #     optimizer = self.optimizer,
+        #     milestones = [3],
+        #     gamma = 0.1
+
+        # )
         self.model.to(self.args.device)
 
 
