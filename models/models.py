@@ -98,7 +98,7 @@ class RADFREModel(nn.Module):
         self.dropout_ent = nn.Dropout(p=0.5)
         self.mha = MultiHeadAttention(n_head=16, query_input_dim=1024, key_input_dim=1024 , value_input_dim=1024, query_hidden=1024, key_hidden=1024, value_hidden=1024, output_dim=1024)#n_head, query_input_dim, key_input_dim, value_input_dim, query_hidden, key_hidden, value_hidden, output_dim
 
-        self.classifier = nn.Linear(args.embed_size*3, num_labels)
+        self.classifier = nn.Linear(args.embed_size*2, num_labels)
 
         
 
@@ -155,15 +155,24 @@ class RADFREModel(nn.Module):
         #     c0 = torch.randn(4, 3, 20).cuda()
         # else:
             
-        lstm_output, (hn, cn) = self.lstm(pairs_emb_lst[0])#torch.Size([bsz, 80, 1024])
-        entity_joint_emb = self.fc_entity(entity_emb)#torch.Size(bzs, 2, 1024])
-        entity_joint_emb = self.dropout_ent(entity_joint_emb)
-        att, att_out = self.mha(entity_joint_emb, lstm_output, lstm_output)
-        bsz = att_out.shape[0]
-        logits = att_out.view(bsz,-1) 
-        logits = torch.cat([logits, stc ],dim=-1)     
-        logits = self.classifier(logits)
-        
+        # lstm_output, (hn, cn) = self.lstm(pairs_emb_lst[0])#torch.Size([bsz, 80, 1024])
+        # entity_joint_emb = self.fc_entity(entity_emb)#torch.Size(bzs, 2, 1024])
+        # entity_joint_emb = self.dropout_ent(entity_joint_emb)
+        # att, att_out = self.mha(entity_joint_emb, lstm_output, lstm_output)
+        # bsz = att_out.shape[0]
+        # logits = att_out.view(bsz,-1) 
+        # logits = torch.cat([logits, stc ],dim=-1)     
+        # logits = self.classifier(logits)
+        bsz, seq_len, hidden_size = pairs_emb_lst[0].shape
+        entity_hidden_state = torch.Tensor(bsz, 2*hidden_size) # batch, 2*hidden
+        for i in range(bsz):
+            head_idx = input_ids[i].eq(self.head_start).nonzero().item()
+            tail_idx = input_ids[i].eq(self.tail_start).nonzero().item()
+            head_hidden = pairs_emb_lst[0][i, head_idx, :].squeeze()
+            tail_hidden = pairs_emb_lst[0][i, tail_idx, :].squeeze()
+            entity_hidden_state[i] = torch.cat([head_hidden, tail_hidden], dim=-1)
+        entity_hidden_state = entity_hidden_state.to(self.args.device)
+        logits = self.classifier(entity_hidden_state)
 
         # n_img, n_stc = paths_l2.size()[:2]#torch.Size([16, 1, 3]) -> torch.Size([16, 1])
 
