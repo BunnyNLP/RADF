@@ -93,7 +93,7 @@ class RADFREModel(nn.Module):
 
         ######################################## Classifier ######################################## 
         self.lstm = torch.nn.LSTM(1024,512,batch_first=True,bidirectional=True,dropout=0.1)
-        
+        self.LN = nn.LayerNorm(args.embed_size)
         self.fc_entity = nn.Linear(768,1024)
         self.dropout_ent = nn.Dropout(p=0.5)
         self.mha = MultiHeadAttention(n_head=16, query_input_dim=1024, key_input_dim=1024 , value_input_dim=1024, query_hidden=1024, key_hidden=1024, value_hidden=1024, output_dim=1024)#n_head, query_input_dim, key_input_dim, value_input_dim, query_hidden, key_hidden, value_hidden, output_dim
@@ -137,11 +137,17 @@ class RADFREModel(nn.Module):
         tail_o = tail_out.pooler_output#torch.Size([16, 768])
         entity_emb = torch.stack([head_o,tail_o],dim=1)
 
-
+        # import pdb;pdb.set_trace()
         #DIME
         pairs_emb_lst, paths_l0 = self.dynamic_itr_l0(rgn, img, wrd, stc, stc_lens)
+        for i in range(len(pairs_emb_lst)):
+            pairs_emb_lst[i] = self.LN(pairs_emb_lst[i])
         pairs_emb_lst, paths_l1 = self.dynamic_itr_l1(pairs_emb_lst, rgn, img, wrd, stc, stc_lens)
+        for i in range(len(pairs_emb_lst)):
+            pairs_emb_lst[i] = self.LN(pairs_emb_lst[i])
         pairs_emb_lst, paths_l2 = self.dynamic_itr_l2(pairs_emb_lst, rgn, img, wrd, stc, stc_lens)
+        for i in range(len(pairs_emb_lst)):
+            pairs_emb_lst[i] = self.LN(pairs_emb_lst[i])
 
         # logits = self.classifier(pairs_emb_lst, rgn, img, wrd, stc, stc_lens)#相当于特定任务的分类头，要输出logits
         # if init_states is None:
@@ -149,10 +155,10 @@ class RADFREModel(nn.Module):
         #     c0 = torch.randn(4, 3, 20).cuda()
         # else:
             
-        # lstm_output, (hn, cn) = self.lstm(pairs_emb_lst[0])#torch.Size([bsz, 80, 1024])
+        lstm_output, (hn, cn) = self.lstm(pairs_emb_lst[0])#torch.Size([bsz, 80, 1024])
         entity_joint_emb = self.fc_entity(entity_emb)#torch.Size(bzs, 2, 1024])
         entity_joint_emb = self.dropout_ent(entity_joint_emb)
-        att, att_out = self.mha(entity_joint_emb, pairs_emb_lst[0], pairs_emb_lst[0])
+        att, att_out = self.mha(entity_joint_emb, lstm_output, lstm_output)
         bsz = att_out.shape[0]
         logits = att_out.view(bsz,-1) 
         logits = torch.cat([logits, stc ],dim=-1)     

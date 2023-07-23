@@ -110,7 +110,7 @@ class CrossAttention(nn.Module):
         self.att_layer = CrossAttentionLayer(embed_size, h, drop=drop)
         self.mlp = FeedForward(embed_size, hid_size, drop=drop)
         self.dropout = nn.Dropout(drop)
-
+        self.layernorm = nn.LayerNorm(80,embed_size)
     def forward(self, rgn, img, wrd, stc, stc_lens, mask=None):
         x = self.att_layer(wrd, rgn, rgn, mask=mask)  
         self_att_emb = wrd + self.dropout(x)
