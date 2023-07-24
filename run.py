@@ -27,6 +27,10 @@ import os
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
+logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt = '%m/%d/%Y %H:%M:%S',
+                    level = logging.INFO)
+logger = logging.getLogger(__name__)
 
 MODEL_CLASSES = {
     'MRE': RADFREModel,
@@ -222,12 +226,6 @@ def main():
 
 
     ti = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
-
-    logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-                    datefmt = '%Y-%m-%d_%H:%M:%S',
-                    level = logging.INFO)
-    logger = logging.getLogger(__name__)
-
     writer = wandb.init(project='RADF',
            name=args.dataset_name+"_"+ti,
            config=args,
