@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
 DATASET_NAME="MRE"
-BERT_NAME="bert-base-uncased"
+BERT_NAME="./bert-base-uncased"
 
 CUDA_VISIBLE_DEVICES=0 python -u  run.py \
         --dataset_name=${DATASET_NAME} \
         --bert_name=${BERT_NAME} \
         --num_epochs=15 \
         --batch_size=16 \
-        --lr=5e-5 \
+        --lr=1e-5 \
         --warmup_ratio=0.06 \
         --eval_begin_epoch=1 \
         --seed=3407 \

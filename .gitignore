@@ -13,3 +13,6 @@ wandb/
 .ipynb_checkpoints/
 
 *.pyc
+
+
+bert-base-uncased/

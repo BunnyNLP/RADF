@@ -186,23 +186,44 @@ class MMREDataset(Dataset):
 
 
          # image process
+        if self.img_path is not None:
+            try:
+                img_path = os.path.join(self.img_path, imgid)
+                image = Image.open(img_path).convert('RGB')
+                image = self.transform(image)
+            except:
+                img_path = os.path.join(self.img_path, 'inf.png')#为什么找不到图片要指向这张
+                image = Image.open(img_path).convert('RGB')
+                image = self.transform(image)
+            if self.aux_img_path is not None:
+                # process aux image
+                aux_imgs = []
+                aux_img_paths = []
+                imgid = imgid.split(".")[0]#图片名，不要.jpg
+                if item_id in self.data_dict['aux_imgs']:
+                    aux_img_paths  = self.data_dict['aux_imgs'][item_id]
+                    aux_img_paths = [os.path.join(self.aux_img_path, path) for path in aux_img_paths]
+                # discaed more than 3 aux image
+                for i in range(min(3, len(aux_img_paths))):
+                    aux_img = Image.open(aux_img_paths[i]).convert('RGB')
+                    aux_img = self.transform(aux_img)
+                    aux_imgs.append(aux_img)
 
-        try:
-            img_path = os.path.join(self.img_path, imgid)
-            image = Image.open(img_path).convert('RGB')
-            image = self.transform(image)
-        except:
-            img_path = os.path.join(self.img_path, 'inf.png')#为什么找不到图片要指向这张
-            image = Image.open(img_path).convert('RGB')
-            image = self.transform(image)
+                # padding zero if less than 3
+                for i in range(3-len(aux_img_paths)):
+                    aux_imgs.append(torch.zeros((3, 224, 224))) 
 
-        ##FasterRCNN部分
+                aux_imgs = torch.stack(aux_imgs, dim=0)
+                assert len(aux_imgs) == 3
+                '''所以aux_imgs的size应该是一个list,每个元素 3*224*224, 共3个元素'''
+
+        ######################################### FasterRCNN部分 #########################################
         imgid = imgid.split(".")[0]
         imgobj_path = os.path.join(self.img_features_path , imgid + ".pt")
         obj_feature = torch.load(imgobj_path)
         # print(obj_feature.shape)
 
-        return input_ids, token_type_ids, attention_mask, torch.tensor(re_label), image, obj_feature, head_enc, tail_enc
+        return input_ids, token_type_ids, attention_mask, torch.tensor(re_label), image, aux_imgs, obj_feature, head_enc, tail_enc
     
 class MMPNERDataset(Dataset):
     def __init__(self, processor, transform, img_path=None, aux_img_path=None, max_seq=40, sample_ratio=1, mode='train', ignore_idx=0) -> None:

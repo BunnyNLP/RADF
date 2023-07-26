@@ -139,6 +139,17 @@ class RADFREModel(nn.Module):
         past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(2)
         return past_key_values, seqlen
     
+    def get_auximgs_ft(self, aux_imgs):#16,3,3,224,224
+        aux_imgs = aux_imgs.permute(1,0,2,3,4)# 3 16,3,224,224
+        aux = []
+        for i in range(len(aux_imgs)):
+            ft = self.image_model(aux_imgs[i,:,:,:,:])
+            aux.append(ft)
+        aux_imgs = torch.stack(aux, dim=0)
+        aux_imgs = aux_imgs.permute(1,0,2)
+        return aux_imgs
+
+
 
 
     def forward(
@@ -148,7 +159,7 @@ class RADFREModel(nn.Module):
         token_type_ids=None, #torch.Size([16, 80])
         labels=None, #torch.Size([16])
         images=None, #torch.Size([16, 3, 224, 224]) 只是经过预处理的图像
-        # aux_imgs=None, #torch.Size([16, 3, 3, 224, 224])
+        aux_imgs=None, #torch.Size([16, 3, 3, 224, 224])
         img_feat = None, #torch.Size([4,1024])
         head_enc = None,
         tail_enc = None        
@@ -161,11 +172,11 @@ class RADFREModel(nn.Module):
         stc_lens : 64 * 1 -> 16 * 1
         '''
 
-
         _ , rgn = self.img_enc(img_feat) #object-level feature -> torch.Size([16, 4, 1024]) 下划线是通过平均池化求出来的全局图片向量
         img = self.image_model(images)#torch.Size([16, 1024])
         stc, wrd = self.txt_enc(input_ids, attention_mask, token_type_ids)
         stc_lens = input_ids.shape[0]
+        rgn = self.get_auximgs_ft(aux_imgs)
 
 
         #Head and Tail Entity

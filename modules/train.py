@@ -185,8 +185,8 @@ class RETrainer(BaseTrainer):
         
     def _step(self, batch, mode="train"):
         if mode != "predict":
-            input_ids, token_type_ids, attention_mask, labels, images, img_feat, head_enc, tail_enc = batch
-            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, labels=labels, images=images, img_feat=img_feat, head_enc=head_enc, tail_enc= tail_enc)
+            input_ids, token_type_ids, attention_mask, labels, images, aux_imgs,  img_feat, head_enc, tail_enc = batch
+            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token_type_ids, labels=labels, images=images, aux_imgs=aux_imgs,  img_feat=img_feat, head_enc=head_enc, tail_enc= tail_enc)
             return outputs, labels
 
     def before_train(self):
