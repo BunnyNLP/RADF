@@ -226,7 +226,7 @@ class MMREDataset(Dataset):
         return input_ids, token_type_ids, attention_mask, torch.tensor(re_label), image, aux_imgs, obj_feature, head_enc, tail_enc
     
 class MMPNERDataset(Dataset):
-    def __init__(self, processor, transform, img_path=None, aux_img_path=None, max_seq=40, sample_ratio=1, mode='train', ignore_idx=0) -> None:
+    def __init__(self, processor, transform, img_path=None, aux_img_path=None, img_objfea=None, max_seq=40, sample_ratio=1, mode='train', ignore_idx=0) -> None:
         self.processor = processor
         self.transform = transform
         self.data_dict = processor.load_from_file(mode, sample_ratio)

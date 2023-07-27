@@ -98,11 +98,11 @@ class CrossmodalFusionUnit(nn.Module):
         self.router = Router(num_out_path, opt.embed_size, opt.hid_router)
         self.cha = CrossAttention(opt.embed_size, opt.hid_FSRU, opt.num_head_FSRU)
 
-    def forward(self, rgn, img, wrd, stc, stc_lens):
+    def forward(self, rgn, img, wrd, stc, stc_lens, similarity_score):
         l_emb = wrd
 
         path_prob = self.router(l_emb)
-        rf_pairs_emb = self.cha(rgn, img, wrd, stc, stc_lens)
+        rf_pairs_emb = self.cha(rgn, img, wrd, stc, stc_lens, similarity_score)
         return rf_pairs_emb, path_prob
 ##########################################################################################
 

@@ -110,10 +110,14 @@ class CrossAttention(nn.Module):
         self.att_layer = CrossAttentionLayer(embed_size, h, drop=drop)
         self.mlp = FeedForward(embed_size, hid_size, drop=drop)
         self.dropout = nn.Dropout(drop)
+        self.sim_gate = nn.Tanh()
 
-    def forward(self, rgn, img, wrd, stc, stc_lens, mask=None):
+    def forward(self, rgn, img, wrd, stc, stc_lens, similarity_score, mask=None):
         x = self.att_layer(wrd, rgn, rgn, mask=mask)  
-        self_att_emb = wrd + self.dropout(x)
+        a,b = wrd.shape[1], wrd.shape[2]
+        score = self.sim_gate(similarity_score)
+        score = score.unsqueeze(-1).unsqueeze(-1).repeat(1,a,b).cuda()
+        self_att_emb = wrd +  torch.mul(score , self.dropout(x))
         x = self.mlp(self_att_emb)      
         fw_emb = self_att_emb + self.dropout(x)
 

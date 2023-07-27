@@ -36,6 +36,8 @@ from .DynamicInteraction import DynamicInteraction_Layer0, DynamicInteraction_La
 
 from .attention import MultiHeadAttention
 
+from .SimilarGraphReasoning import EncoderSimilarity
+
 
 def freeze_layers(model):
     for child in model.children():
@@ -98,6 +100,8 @@ class RADFREModel(nn.Module):
         # freeze_layers(self.bert)#冻结参数
 
         self.image_model = ImageModel(args)
+        ############################## Similarity Graph Reasoning ############################## 
+        self.SGR = EncoderSimilarity(args.embed_size, args.sim_size, args.sgr_step)
 
         ############################## Dynamic Router Patameters ############################## 
         self.txt_enc = EncoderText(args,self.bert)
@@ -172,12 +176,16 @@ class RADFREModel(nn.Module):
         stc_lens : 64 * 1 -> 16 * 1
         '''
 
+
         _ , rgn = self.img_enc(img_feat) #object-level feature -> torch.Size([16, 4, 1024]) 下划线是通过平均池化求出来的全局图片向量
         img = self.image_model(images)#torch.Size([16, 1024])
         stc, wrd = self.txt_enc(input_ids, attention_mask, token_type_ids)
         stc_lens = input_ids.shape[0]
         rgn = self.get_auximgs_ft(aux_imgs)
 
+        cap_lens = attention_mask.sum(dim=-1)
+        sim_score = self.SGR(rgn, wrd, cap_lens)
+        similarity_score =torch.Tensor([sim_score[i,i] for i in range(stc_lens)])
 
         #Head and Tail Entity
         head_out = self.bert(input_ids = torch.stack(head_enc['input_ids'],dim=1).cuda(), token_type_ids=torch.stack(head_enc['token_type_ids'],dim=1).cuda(), attention_mask=torch.stack(head_enc['attention_mask'],dim=1).cuda())
@@ -188,9 +196,9 @@ class RADFREModel(nn.Module):
 
 
         #DIME
-        pairs_emb_lst, paths_l0 = self.dynamic_itr_l0(rgn, img, wrd, stc, stc_lens)
-        pairs_emb_lst, paths_l1 = self.dynamic_itr_l1(pairs_emb_lst, rgn, img, wrd, stc, stc_lens)
-        pairs_emb_lst, paths_l2 = self.dynamic_itr_l2(pairs_emb_lst, rgn, img, wrd, stc, stc_lens)
+        pairs_emb_lst, paths_l0 = self.dynamic_itr_l0(rgn, img, wrd, stc, stc_lens,similarity_score)
+        pairs_emb_lst, paths_l1 = self.dynamic_itr_l1(pairs_emb_lst, rgn, img, wrd, stc, stc_lens,similarity_score)
+        pairs_emb_lst, paths_l2 = self.dynamic_itr_l2(pairs_emb_lst, rgn, img, wrd, stc, stc_lens,similarity_score)
 
 
         #Prompt tuning
@@ -270,41 +278,77 @@ class RADFREModel(nn.Module):
 
 
 class RADFNERModel(nn.Module):
-    def __init__(self, label_list, args):
+    def __init__(self, label_list, args, num_layer_routing=3, num_cells=3, path_hid=128):
         super(RADFNERModel, self).__init__()
         self.args = args
         self.prompt_dim = args.prompt_dim
         self.prompt_len = args.prompt_len
         self.bert = BertModel.from_pretrained(args.bert_name)
         self.bert_config = self.bert.config
+        
+        # freeze_layers(self.bert)#冻结参数
 
-        if args.use_prompt:
-            self.image_model = ImageModel()  # bsz, 6, 56, 56
-            self.encoder_conv =  nn.Sequential(
-                            nn.Linear(in_features=3840, out_features=800),
-                            nn.Tanh(),
-                            nn.Linear(in_features=800, out_features=4*2*768)
-                            )
-            self.gates = nn.ModuleList([nn.Linear(4*768*2, 4) for i in range(12)])
+        self.image_model = ImageModel(args)
+        ############################## Similarity Graph Reasoning ############################## 
+        self.SGR = EncoderSimilarity(args.embed_size, args.sim_size, args.sgr_step)
 
+        ############################## Dynamic Router Patameters ############################## 
+        self.txt_enc = EncoderText(args,self.bert)
+        self.img_enc = EncoderImage(args.img_dim, args.embed_size, args.finetune, use_abs=args.use_abs, no_imgnorm=args.no_imgnorm, drop=args.drop)
+        
+        self.num_cells = num_cells
+        self.dynamic_itr_l0 = DynamicInteraction_Layer0(self.args, num_cells, num_cells)
+        self.dynamic_itr_l1 = DynamicInteraction_Layer(self.args, num_cells, num_cells)
+        self.dynamic_itr_l2 = DynamicInteraction_Layer(self.args, num_cells, 1)
+        total_paths = num_cells ** 2 * (num_layer_routing - 1) + num_cells
+        self.path_mapping = nn.Linear(total_paths, path_hid)
+        self.bn = nn.BatchNorm1d(self.args.embed_size)
+
+        ######################################## Classifier ######################################## 
         self.num_labels  = len(label_list)  # pad
         print(self.num_labels)
         self.crf = CRF(self.num_labels, batch_first=True)
         self.fc = nn.Linear(self.bert.config.hidden_size, self.num_labels)
         self.dropout = nn.Dropout(0.1)
 
-    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None, images=None, aux_imgs=None):
+    def forward(self, input_ids=None, attention_mask=None, token_type_ids=None, labels=None, images=None, aux_imgs=None, img_feat=None):
+
+        _ , rgn = self.img_enc(img_feat) #object-level feature -> torch.Size([16, 4, 1024]) 下划线是通过平均池化求出来的全局图片向量
+        img = self.image_model(images)#torch.Size([16, 1024])
+        stc, wrd = self.txt_enc(input_ids, attention_mask, token_type_ids)
+        stc_lens = input_ids.shape[0]
+        rgn = self.get_auximgs_ft(aux_imgs)
+
+        cap_lens = attention_mask.sum(dim=-1)
+        sim_score = self.SGR(rgn, wrd, cap_lens)
+        similarity_score =torch.Tensor([sim_score[i,i] for i in range(stc_lens)])
+
+        #DIME
+        pairs_emb_lst, paths_l0 = self.dynamic_itr_l0(rgn, img, wrd, stc, stc_lens,similarity_score)
+        pairs_emb_lst, paths_l1 = self.dynamic_itr_l1(pairs_emb_lst, rgn, img, wrd, stc, stc_lens,similarity_score)
+        pairs_emb_lst, paths_l2 = self.dynamic_itr_l2(pairs_emb_lst, rgn, img, wrd, stc, stc_lens,similarity_score)
+
+        #Prompt tuning
+        bsz = input_ids.size(0)
+        prompt_guids = pairs_emb_lst[0].permute(0,2,1)#bsz,1024,80
+        prompt_guids = self.fc_prompt(prompt_guids)#bsz,1024,10
+        prompt_guids = prompt_guids.permute(0,2,1)#bsz,10,1024
+        prompt_guids = self.fc_prompt_(prompt_guids)#bsz,10,768
+        prompt_guids, seq_len = self.get_prompt(bsz, prompt_guids)
+
+
+        # seq_len = prompt_guids.size(1)
+        prompt_guids_mask = torch.ones(bsz,seq_len).cuda()
+
         if self.args.use_prompt:
-            prompt_guids = self.get_visual_prompt(images, aux_imgs)
+            prompt_guids = prompt_guids
             prompt_guids_length = prompt_guids[0][0].shape[2]
-            # attention_mask: bsz, seq_len
-            # prompt attention， attention mask
-            bsz = attention_mask.size(0)
-            prompt_guids_mask = torch.ones((bsz, prompt_guids_length)).to(self.args.device)
+            prompt_guids_mask = torch.ones((bsz, prompt_guids_length)).cuda()
             prompt_attention_mask = torch.cat((prompt_guids_mask, attention_mask), dim=1)
         else:
-            prompt_attention_mask = attention_mask
             prompt_guids = None
+            prompt_attention_mask = attention_mask
+
 
         bert_output = self.bert(input_ids=input_ids,
                             attention_mask=prompt_attention_mask,
@@ -323,40 +367,29 @@ class RADFNERModel(nn.Module):
             loss=loss,
             logits=logits
         )
+    
+    def get_prompt(self, batch_size, x):
+        '''x : bsz, 10, 768'''
+        past_key_values = self.prompt_encoder(x)
+        bsz, seqlen, _ = past_key_values.shape
+        past_key_values = past_key_values.view(
+            bsz,
+            seqlen,
+            self.bert.config.num_hidden_layers * 2,
+            self.bert.config.num_attention_heads,
+            self.bert.config.hidden_size//self.bert.config.num_attention_heads
+                )
+        past_key_values = self.dropout(past_key_values)
+        past_key_values = past_key_values.permute([2, 0, 3, 1, 4]).split(2)
+        return past_key_values, seqlen
+    
+    def get_auximgs_ft(self, aux_imgs):#16,3,3,224,224
+        aux_imgs = aux_imgs.permute(1,0,2,3,4)# 3 16,3,224,224
+        aux = []
+        for i in range(len(aux_imgs)):
+            ft = self.image_model(aux_imgs[i,:,:,:,:])
+            aux.append(ft)
+        aux_imgs = torch.stack(aux, dim=0)
+        aux_imgs = aux_imgs.permute(1,0,2)
+        return aux_imgs
 
-    def get_visual_prompt(self, images, aux_imgs):
-        bsz = images.size(0)
-        prompt_guids, aux_prompt_guids = self.image_model(images, aux_imgs)  # [bsz, 256, 2, 2], [bsz, 512, 2, 2]....
-
-        prompt_guids = torch.cat(prompt_guids, dim=1).view(bsz, self.args.prompt_len, -1)   # bsz, 4, 3840
-        aux_prompt_guids = [torch.cat(aux_prompt_guid, dim=1).view(bsz, self.args.prompt_len, -1) for aux_prompt_guid in aux_prompt_guids]  # 3 x [bsz, 4, 3840]
-
-        prompt_guids = self.encoder_conv(prompt_guids)  # bsz, 4, 4*2*768
-        aux_prompt_guids = [self.encoder_conv(aux_prompt_guid) for aux_prompt_guid in aux_prompt_guids] # 3 x [bsz, 4, 4*2*768]
-        split_prompt_guids = prompt_guids.split(768*2, dim=-1)   # 4 x [bsz, 4, 768*2]
-        split_aux_prompt_guids = [aux_prompt_guid.split(768*2, dim=-1) for aux_prompt_guid in aux_prompt_guids]   # 3x [4 x [bsz, 4, 768*2]]
-
-        result = []
-        for idx in range(12):  # 12
-            sum_prompt_guids = torch.stack(split_prompt_guids).sum(0).view(bsz, -1) / 4     # bsz, 4, 768*2
-            prompt_gate = F.softmax(F.leaky_relu(self.gates[idx](sum_prompt_guids)), dim=-1)
-
-            key_val = torch.zeros_like(split_prompt_guids[0]).to(self.args.device)  # bsz, 4, 768*2
-            for i in range(4):
-                key_val = key_val + torch.einsum('bg,blh->blh', prompt_gate[:, i].view(-1, 1), split_prompt_guids[i])
-
-            aux_key_vals = []   # 3 x [bsz, 4, 768*2]
-            for split_aux_prompt_guid in split_aux_prompt_guids:
-                sum_aux_prompt_guids = torch.stack(split_aux_prompt_guid).sum(0).view(bsz, -1) / 4     # bsz, 4, 768*2
-                aux_prompt_gate = F.softmax(F.leaky_relu(self.gates[idx](sum_aux_prompt_guids)), dim=-1)
-                aux_key_val = torch.zeros_like(split_aux_prompt_guid[0]).to(self.args.device)  # bsz, 4, 768*2
-                for i in range(4):
-                    aux_key_val = aux_key_val + torch.einsum('bg,blh->blh', aux_prompt_gate[:, i].view(-1, 1), split_aux_prompt_guid[i])
-                aux_key_vals.append(aux_key_val)
-            key_val = [key_val] + aux_key_vals
-            key_val = torch.cat(key_val, dim=1)
-            key_val = key_val.split(768, dim=-1)
-            key, value = key_val[0].reshape(bsz, 12, -1, 64).contiguous(), key_val[1].reshape(bsz, 12, -1, 64).contiguous()  # bsz, 12, 4, 64
-            temp_dict = (key, value)
-            result.append(temp_dict)
-        return result

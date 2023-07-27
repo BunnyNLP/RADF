@@ -323,14 +323,16 @@ class NERTrainer(BaseTrainer):
                         pbar.update(self.refresh_step)
                         pbar.set_postfix_str(print_output)
                         if self.writer:
-                            self.writer.add_scalar(tag='train_loss', scalar_value=avg_loss, global_step=self.step)    # tensorbordx
+                            # self.writer.add_scalar(tag='train_loss', scalar_value=avg_loss, global_step=self.step)    # tensorbordx
+                            self.writer.log({'train_loss': avg_loss, 'epoch' :epoch}) #wandb
                         avg_loss = 0
                 results = classification_report(y_true, y_pred, digits=4) 
                 self.logger.info("***** Train Eval results *****")
                 self.logger.info("\n%s", results)
                 f1_score = float(results.split('\n')[-4].split('      ')[0].split('    ')[3])
                 if self.writer:
-                    self.writer.add_scalar(tag='train_f1', scalar_value=f1_score, global_step=epoch)    # tensorbordx
+                    # self.writer.add_scalar(tag='train_f1', scalar_value=f1_score, global_step=epoch)    # tensorbordx
+                    self.writer.log({'train_f1':f1_score, 'epoch':epoch})
                 self.logger.info("Epoch {}/{}, best train f1: {}, best epoch: {}, current train f1 score: {}."\
                             .format(epoch, self.args.num_epochs, self.best_train_metric, self.best_train_epoch, f1_score))
                 if f1_score > self.best_train_metric:
@@ -392,8 +394,9 @@ class NERTrainer(BaseTrainer):
                 self.logger.info("\n%s", results)
                 f1_score = float(results.split('\n')[-4].split('      ')[-2].split('    ')[-1]) 
                 if self.writer:
-                    self.writer.add_scalar(tag='dev_f1', scalar_value=f1_score, global_step=epoch)    # tensorbordx
-                    self.writer.add_scalar(tag='dev_loss', scalar_value=total_loss/step, global_step=epoch)    # tensorbordx
+                    # self.writer.add_scalar(tag='dev_f1', scalar_value=f1_score, global_step=epoch)    # tensorbordx
+                    # self.writer.add_scalar(tag='dev_loss', scalar_value=total_loss/step, global_step=epoch)    # tensorbordx
+                    self.writer.log({'dev_f1':f1_score, 'dev_loss':total_loss/step, 'epoch':epoch})#wandb
 
                 self.logger.info("Epoch {}/{}, best dev f1: {}, best epoch: {}, current dev f1 score: {}."\
                             .format(epoch, self.args.num_epochs, self.best_dev_metric, self.best_dev_epoch, f1_score))
@@ -456,8 +459,9 @@ class NERTrainer(BaseTrainer):
                 self.logger.info("\n%s", results)
                 f1_score = float(results.split('\n')[-4].split('      ')[-2].split('    ')[-1])
                 if self.writer:
-                    self.writer.add_scalar(tag='test_f1', scalar_value=f1_score)    # tensorbordx
-                    self.writer.add_scalar(tag='test_loss', scalar_value=total_loss/len(self.test_data))    # tensorbordx
+                    # self.writer.add_scalar(tag='test_f1', scalar_value=f1_score)    # tensorbordx
+                    # self.writer.add_scalar(tag='test_loss', scalar_value=total_loss/len(self.test_data))    # tensorbordx
+                    self.writer.log({'test_f1':f1_score, 'test_loss':total_loss/len(self.test_data)})#wandb
                 total_loss = 0
                 self.logger.info("Test f1 score: {}.".format(f1_score))
                     

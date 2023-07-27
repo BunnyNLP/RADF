@@ -31,13 +31,13 @@ class DynamicInteraction_Layer0(nn.Module):
         self.imrc = FeatureSemanticReasoningUnit(args, num_out_path)
         self.cmrc = CrossmodalFusionUnit(args, num_out_path)
 
-    def forward(self, rgn, img, wrd, stc, stc_lens):
+    def forward(self, rgn, img, wrd, stc, stc_lens, similarity_score):
         path_prob = [None] * self.num_cell
         emb_lst = [None] * self.num_cell
 
         emb_lst[0], path_prob[0] = self.ric(wrd)#torch.Size([16, 80, 1024]) torch.Size([16, 3])
         emb_lst[1], path_prob[1] = self.imrc(wrd, stc_lens=stc_lens)#torch.Size([16, 80, 1024]) torch.Size([16, 3])
-        emb_lst[2], path_prob[2] = self.cmrc(rgn, img, wrd, stc, stc_lens)#torch.Size([16, 80, 1024]) torch.Size([16, 3])
+        emb_lst[2], path_prob[2] = self.cmrc(rgn, img, wrd, stc, stc_lens, similarity_score)#torch.Size([16, 80, 1024]) torch.Size([16, 3])
 
         gate_mask = (sum(path_prob) < self.threshold).float() 
         all_path_prob = torch.stack(path_prob, dim=2)  
@@ -73,7 +73,7 @@ class DynamicInteraction_Layer(nn.Module):
         self.cmrc = CrossmodalFusionUnit(args, num_out_path)
         
 
-    def forward(self, ref_wrd, rgn, img, wrd, stc, stc_lens):
+    def forward(self, ref_wrd, rgn, img, wrd, stc, stc_lens, similarity_score):
         assert len(ref_wrd) == self.num_cell and ref_wrd[0].dim() == 3
 
         path_prob = [None] * self.num_cell
@@ -81,7 +81,7 @@ class DynamicInteraction_Layer(nn.Module):
 
         emb_lst[0], path_prob[0] = self.ric(ref_wrd[0])
         emb_lst[1], path_prob[1] = self.imrc(ref_wrd[1], stc_lens)
-        emb_lst[2], path_prob[2] = self.cmrc(rgn, img, ref_wrd[2], stc, stc_lens)
+        emb_lst[2], path_prob[2] = self.cmrc(rgn, img, ref_wrd[2], stc, stc_lens, similarity_score)
         
         if self.num_out_path == 1:
             aggr_res_lst = []

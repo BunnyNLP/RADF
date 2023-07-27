@@ -30,8 +30,8 @@ os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 MODEL_CLASSES = {
     'MRE': RADFREModel,
-    'twitter15': HMNeTNERModel,
-    'twitter17': HMNeTNERModel
+    'twitter15': RADFNERModel,
+    'twitter17': RADFNERModel
 }
 
 TRAINER_CLASSES = {
@@ -169,6 +169,9 @@ def main():
     parser.add_argument('--max_seq', default=128, type=int)
     parser.add_argument('--ignore_idx', default=-100, type=int)
     parser.add_argument('--sample_ratio', default=1.0, type=float, help="only for low resource.")
+    # SGR
+    parser.add_argument('--sim_size', default=256, type=int, help="Dimensionality of the similarity embedding.") 
+    parser.add_argument('--sgr_step', default=3, type=int, help="The number of the Graph Reasoning Step.") 
     # DIME
     parser.add_argument('--num_head_FSRU', type=int, default=16, help='Number of heads in Feature Semantic Reasoning Unit')
     parser.add_argument('--hid_FSRU', type=int, default=512, help='Hidden size of FeedForward in Feature Semantic Reasoning Unit')
@@ -233,9 +236,9 @@ def main():
            config=args,
            resume='allow')
 
-       
     processor = data_process(data_path, args.bert_name)#<processor.dataset.MMREProcessor object at 0x7effb32043a0>
     train_dataset = dataset_class(processor, transform, img_path, aux_path, img_objfea, args.max_seq, sample_ratio=args.sample_ratio, mode='train')#<processor.dataset.MMREDataset object at 0x7eff45369af0>
+
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)#<torch.utils.data.dataloader.DataLoader object at 0x7eff45369ac0>
 
     dev_dataset = dataset_class(processor, transform, img_path, aux_path, img_objfea, args.max_seq, mode='dev')
